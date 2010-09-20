@@ -41,7 +41,7 @@
 	 pread/2, pread/3, pwrite/2, pwrite/3,
 	 read_line/1,
 	 position/2, truncate/1, datasync/1, sync/1,
-	 copy/2, copy/3]).
+	 copy/2, copy/3, sendfile/4, sendfile/2]).
 %% High level operations
 -export([consult/1, path_consult/2]).
 -export([eval/1, eval/2, path_eval/2, path_eval/3, path_open/3]).
@@ -277,6 +277,35 @@ raw_write_file_info(Name, #file_info{} = Info) ->
 	Error ->
 	    Error
     end.
+
+%% sendfile/4
+-spec sendfile(File :: io_device() | fd(), Sock :: port(),
+	       Offset :: non_neg_integer(), Bytes :: non_neg_integer()) ->
+	{'ok', non_neg_integer()} | {'error', posix()}.
+sendfile(File, Sock, Offset, Bytes) when is_pid(File) ->
+    {ok, SockFD} = prim_inet:getfd(Sock),
+    R = file_request(File, {sendfile, SockFD, Offset, Bytes}),
+    wait_file_reply(File, R);
+sendfile(#file_descriptor{module = Module} = Handle, Sock, Offset, Bytes) ->
+    {ok, SockFD} = prim_inet:getfd(Sock),
+    Module:sendfile(Handle, SockFD, Offset, Bytes);
+sendfile(_, _, _, _) ->
+    {error, badarg}.
+
+%% sendfile/2
+%% TODO:
+%% Should we remove sendfile/2 and let the user handle it?
+%% Should we add more logic that sends chunks instead of the complete
+%% file in one call?
+-spec sendfile(SourceFD :: fd(), DestFD :: port()) ->
+	{'ok', non_neg_integer()} | {'error', posix()}.
+sendfile(File, Sock) ->
+    Offset = 0,
+    {ok, #file_info{size = Bytes}} = file:read_file_info(File),
+    {ok, Fd} = file:open(File, [read]),
+    Res = sendfile(Fd, Sock, Offset, Bytes),
+    ok = file:close(Fd),
+    Res.
 
 %%%-----------------------------------------------------------------
 %%% File io server functions.
